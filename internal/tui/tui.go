@@ -110,8 +110,6 @@ type appModel struct {
 	showInitDialog bool
 	initDialog     dialog.InitDialogCmp
 
-	editingMode bool
-
 	showFilepicker bool
 	filepicker     chat.FilepickerCmp
 }
