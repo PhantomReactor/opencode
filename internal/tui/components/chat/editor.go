@@ -66,7 +66,7 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 	),
 }
 
-func openEditor() tea.Cmd {
+func (m *editorCmp) openEditor() tea.Cmd {
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
 		editor = "nvim"
@@ -93,8 +93,11 @@ func openEditor() tea.Cmd {
 			return util.ReportWarn("Message is empty")
 		}
 		os.Remove(tmpfile.Name())
+		attachments := m.attachments
+		m.attachments = nil
 		return SendMsg{
-			Text: string(content),
+			Text:        string(content),
+			Attachments: attachments,
 		}
 	})
 }
@@ -178,7 +181,7 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.app.CoderAgent.IsSessionBusy(m.session.ID) {
 				return m, util.ReportWarn("Agent is working, please wait...")
 			}
-			return m, openEditor()
+			return m, m.openEditor()
 		}
 		// Handle Enter key
 		if m.textarea.Focused() && key.Matches(msg, editorMaps.Send) {
