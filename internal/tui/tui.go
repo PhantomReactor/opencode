@@ -340,6 +340,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			if a.showFilepicker {
 				a.showFilepicker = false
+				a.filepicker.ToggleFilepicker(a.showFilepicker)
 			}
 			if a.showModelDialog {
 				a.showModelDialog = false
@@ -387,25 +388,28 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, a.moveToPage(page.ChatPage)
 			}
 		case key.Matches(msg, returnKey):
-			if a.showQuit {
-				a.showQuit = !a.showQuit
-				return a, nil
-			}
-			if a.showHelp {
-				a.showHelp = !a.showHelp
-				return a, nil
-			}
-			if a.showInitDialog {
-				a.showInitDialog = false
-				// Mark the project as initialized without running the command
-				if err := config.MarkProjectInitialized(); err != nil {
-					return a, util.ReportError(err)
+			if !a.filepicker.IsCWDFocused() {
+				if a.showQuit {
+					a.showQuit = !a.showQuit
+					return a, nil
 				}
-				return a, nil
-			}
-			if a.showFilepicker {
-				a.showFilepicker = false
-				return a, nil
+				if a.showHelp {
+					a.showHelp = !a.showHelp
+					return a, nil
+				}
+				if a.showInitDialog {
+					a.showInitDialog = false
+					// Mark the project as initialized without running the command
+					if err := config.MarkProjectInitialized(); err != nil {
+						return a, util.ReportError(err)
+					}
+					return a, nil
+				}
+				if a.showFilepicker {
+					a.showFilepicker = false
+					a.filepicker.ToggleFilepicker(a.showFilepicker)
+					return a, nil
+				}
 			}
 		case key.Matches(msg, keys.Logs):
 			return a, a.moveToPage(page.LogsPage)
@@ -425,6 +429,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case key.Matches(msg, keys.Filepicker):
 			a.showFilepicker = !a.showFilepicker
+			a.filepicker.ToggleFilepicker(a.showFilepicker)
 			return a, nil
 		}
 	default:

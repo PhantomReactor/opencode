@@ -2,14 +2,8 @@ package chat
 
 import (
 	"fmt"
-	"net/http"
-	"os"
-	"path/filepath"
-	"sort"
-	"strings"
-	"time"
-
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -18,6 +12,12 @@ import (
 	"github.com/opencode-ai/opencode/internal/preview"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
+	"net/http"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"time"
 )
 
 const (
@@ -28,11 +28,11 @@ var enterKey = key.NewBinding(
 	key.WithKeys("enter"),
 )
 var down = key.NewBinding(
-	key.WithKeys("j"),
+	key.WithKeys("j", "down"),
 )
 
 var up = key.NewBinding(
-	key.WithKeys("k"),
+	key.WithKeys("k", "up"),
 )
 var forward = key.NewBinding(
 	key.WithKeys("l"),
@@ -41,7 +41,7 @@ var enter = key.NewBinding(
 	key.WithKeys("enter"),
 )
 var backward = key.NewBinding(
-	key.WithKeys("h"),
+	key.WithKeys("h", "backspace"),
 )
 
 var openFilepiceker = key.NewBinding(
@@ -51,18 +51,29 @@ var returnKey = key.NewBinding(
 	key.WithKeys("esc"),
 	key.WithHelp("esc", "close"),
 )
+var insetCWD = key.NewBinding(
+	key.WithKeys("i"),
+	key.WithHelp("i", "insert"),
+)
+
+var escKey = key.NewBinding(
+	key.WithKeys("esc"),
+	key.WithHelp("esc", "escape"),
+)
 
 type filepickerCmp struct {
-	basePath     string
-	width        int
-	height       int
-	cursor       int
-	err          error
-	cursorChain  stack
-	viewport     viewport.Model
-	dirs         []os.DirEntry
-	cwd          *DirNode
-	selectedFile string
+	basePath       string
+	width          int
+	height         int
+	cursor         int
+	err            error
+	cursorChain    stack
+	viewport       viewport.Model
+	dirs           []os.DirEntry
+	cwdDetails     *DirNode
+	selectedFile   string
+	cwd            textinput.Model
+	ShowFilePicker bool
 }
 
 type DirNode struct {
@@ -90,69 +101,109 @@ func (f *filepickerCmp) Init() tea.Cmd {
 }
 
 func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		f.width = 60
 		f.height = 20
 		f.viewport.Width = 80
-		f.viewport.Height = 23
+		f.viewport.Height = 25
 		f.cursor = 0
 		f.getCurrentFileBelowCursor()
 	case tea.KeyMsg:
 		switch {
+		case key.Matches(msg, insetCWD):
+			f.cwd.Focus()
+			return f, cmd
+		case key.Matches(msg, escKey):
+			if f.cwd.Focused() {
+				f.cwd.Blur()
+			}
 		case key.Matches(msg, down):
-			if f.cursor < len(f.dirs)-1 {
-				f.cursor++
-				f.getCurrentFileBelowCursor()
+			if !f.cwd.Focused() || msg.String() == "down" {
+				if f.cursor < len(f.dirs)-1 {
+					f.cursor++
+					f.getCurrentFileBelowCursor()
+				}
 			}
 		case key.Matches(msg, up):
-			if f.cursor > 0 {
-				f.cursor--
-				f.getCurrentFileBelowCursor()
+			if !f.cwd.Focused() || msg.String() == "up" {
+				if f.cursor > 0 {
+					f.cursor--
+					f.getCurrentFileBelowCursor()
+				}
 			}
 		case key.Matches(msg, enter):
-			if f.dirs[f.cursor].IsDir() {
+			var path string
+			var isPathDir bool
+			if f.cwd.Focused() {
+				path = f.cwd.Value()
+				fileInfo, err := os.Stat(path)
+				if err != nil {
+					logging.ErrorPersist("Invalid path")
+					return f, cmd
+				}
+				isPathDir = fileInfo.IsDir()
+			} else {
+				path = f.cwdDetails.directory + "/" + f.dirs[f.cursor].Name()
+				isPathDir = f.dirs[f.cursor].IsDir()
+			}
+			if isPathDir {
 				f.cursorChain.Push(f.cursor)
-				newWorkingDir := DirNode{parent: f.cwd, directory: f.cwd.directory + "/" + f.dirs[f.cursor].Name()}
-				f.cwd.child = &newWorkingDir
-				f.cwd = f.cwd.child
+				newWorkingDir := DirNode{parent: f.cwdDetails, directory: path}
+				f.cwdDetails.child = &newWorkingDir
+				f.cwdDetails = f.cwdDetails.child
+				f.dirs = readDir(path, false)
 				f.cursor = 0
+				f.cwd.SetValue(f.cwdDetails.directory)
 			} else {
 				return f.addAttachmentToMessage()
 			}
 		case key.Matches(msg, returnKey):
-			f.cursorChain = make(stack, 0)
-			f.cursor = 0
-		case key.Matches(msg, forward):
-			if f.dirs[f.cursor].IsDir() {
-				newWorkingDir := DirNode{parent: f.cwd, directory: f.cwd.directory + "/" + f.dirs[f.cursor].Name()}
-				f.cwd.child = &newWorkingDir
-				f.cwd = f.cwd.child
-				f.cursorChain = f.cursorChain.Push(f.cursor)
-				f.dirs = readDir(f.cwd.directory, false)
+			if !f.cwd.Focused() {
+				f.cursorChain = make(stack, 0)
 				f.cursor = 0
+			} else {
+				f.cwd.Blur()
+			}
+		case key.Matches(msg, forward):
+			if !f.cwd.Focused() {
+				if f.dirs[f.cursor].IsDir() {
+					newWorkingDir := DirNode{parent: f.cwdDetails, directory: f.cwdDetails.directory + "/" + f.dirs[f.cursor].Name()}
+					f.cwdDetails.child = &newWorkingDir
+					f.cwdDetails = f.cwdDetails.child
+					f.cursorChain = f.cursorChain.Push(f.cursor)
+					f.dirs = readDir(f.cwdDetails.directory, false)
+					f.cursor = 0
+					f.cwd.SetValue(f.cwdDetails.directory)
+				}
 			}
 		case key.Matches(msg, backward):
-			if len(f.cursorChain) != 0 && f.cwd.parent != nil {
-				f.cursorChain, f.cursor = f.cursorChain.Pop()
-
-				f.cwd = f.cwd.parent
-				f.cwd.child = nil
-				f.dirs = readDir(f.cwd.directory, false)
+			if !f.cwd.Focused() {
+				if len(f.cursorChain) != 0 && f.cwdDetails.parent != nil {
+					f.cursorChain, f.cursor = f.cursorChain.Pop()
+					f.cwdDetails = f.cwdDetails.parent
+					f.cwdDetails.child = nil
+					f.dirs = readDir(f.cwdDetails.directory, false)
+					f.cwd.SetValue(f.cwdDetails.directory)
+				}
 			}
 		case key.Matches(msg, openFilepiceker):
-			f.dirs = readDir(f.cwd.directory, false)
+			f.dirs = readDir(f.cwdDetails.directory, false)
 			f.cursor = 0
 			f.getCurrentFileBelowCursor()
 		}
 	}
-	return f, nil
+	if f.cwd.Focused() {
+		f.cwd, cmd = f.cwd.Update(msg)
+	}
+	return f, cmd
 }
 
 func (f *filepickerCmp) addAttachmentToMessage() (tea.Model, tea.Cmd) {
 	if isExtSupported(f.dirs[f.cursor].Name()) {
 		f.selectedFile = f.dirs[f.cursor].Name()
-		selectedFilePath := f.cwd.directory + "/" + f.selectedFile
+		selectedFilePath := f.cwdDetails.directory + "/" + f.selectedFile
 		isFileLarge, err := preview.ValidateFileSize(selectedFilePath, maxAttachmentSize)
 		if err != nil {
 			logging.ErrorPersist("unable to read the image")
@@ -163,7 +214,7 @@ func (f *filepickerCmp) addAttachmentToMessage() (tea.Model, tea.Cmd) {
 			return f, nil
 		}
 
-		content, err := os.ReadFile(f.cwd.directory + "/" + f.selectedFile)
+		content, err := os.ReadFile(f.cwdDetails.directory + "/" + f.selectedFile)
 		if err != nil {
 			logging.ErrorPersist("Unable read selected file")
 			return f, nil
@@ -193,7 +244,7 @@ func (f *filepickerCmp) View() string {
 			adjustedWidth = len(file.Name()) + 4
 		}
 	}
-	adjustedWidth = max(30, min(adjustedWidth, f.width-15))
+	adjustedWidth = max(30, min(adjustedWidth, f.width-15)) + 1
 
 	files := make([]string, 0, maxVisibleDirs)
 	startIdx := 0
@@ -240,28 +291,36 @@ func (f *filepickerCmp) View() string {
 		files = append(files, styles.BaseStyle.Width(adjustedWidth).Render(""))
 	}
 
-	title := styles.BaseStyle.
-		Foreground(styles.PrimaryColor).
-		Bold(true).
+	currentPath := styles.BaseStyle.
+		PaddingBottom(1).
+		Height(1).
 		Width(adjustedWidth).
-		Padding(0, 1).
-		Render("Pick a file")
+		Render(f.cwd.View())
 
 	viewportstyle := lipgloss.NewStyle().
-		Width(f.viewport.Width-2).
+		Width(f.viewport.Width - 2).
 		Background(styles.Background).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.ForgroundDim).
-		Padding(1, 1, 1, 1).
+		Padding(2).
 		Render(f.viewport.View())
+	var insertExitText string
+	if f.IsCWDFocused() {
+		insertExitText = "Press esc to exit typing path"
+	} else {
+		insertExitText = "Press i to start typing path"
+	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
-		title,
+		currentPath,
 		styles.BaseStyle.Width(adjustedWidth).Render(""),
 		styles.BaseStyle.Width(adjustedWidth).Render(lipgloss.JoinVertical(lipgloss.Left, files...)),
 		styles.BaseStyle.Width(adjustedWidth).Render(""),
+		styles.BaseStyle.Foreground(styles.Primary).Width(adjustedWidth).Render(insertExitText),
 	)
+
+	f.cwd.SetValue(f.cwd.Value())
 
 	return lipgloss.JoinHorizontal(lipgloss.Center, styles.BaseStyle.Padding(1, 2).
 		Border(lipgloss.RoundedBorder()).
@@ -273,18 +332,33 @@ func (f *filepickerCmp) View() string {
 
 type FilepickerCmp interface {
 	tea.Model
+	ToggleFilepicker(showFilepicker bool)
+	IsCWDFocused() bool
+}
+
+func (f *filepickerCmp) ToggleFilepicker(showFilepicker bool) {
+	f.ShowFilePicker = showFilepicker
+}
+
+func (f *filepickerCmp) IsCWDFocused() bool {
+	return f.cwd.Focused()
 }
 
 func NewFilepickerCmp() FilepickerCmp {
 	homepath, err := os.UserHomeDir()
 	if err != nil {
-		logging.Error("error loading use files")
+		logging.Error("error loading user files")
 		return nil
 	}
 	baseDir := DirNode{parent: nil, directory: homepath}
 	dirs := readDir(homepath, false)
 	viewport := viewport.New(0, 0)
-	return &filepickerCmp{cwd: &baseDir, dirs: dirs, cursorChain: make(stack, 0), viewport: viewport}
+	currentDirectory := textinput.New()
+	currentDirectory.CharLimit = 200
+	currentDirectory.Width = 44
+	currentDirectory.Cursor.Blink = true
+	currentDirectory.SetValue(baseDir.directory)
+	return &filepickerCmp{cwdDetails: &baseDir, dirs: dirs, cursorChain: make(stack, 0), viewport: viewport, cwd: currentDirectory}
 }
 
 func (f *filepickerCmp) getCurrentFileBelowCursor() {
@@ -297,7 +371,7 @@ func (f *filepickerCmp) getCurrentFileBelowCursor() {
 	dir := f.dirs[f.cursor]
 	filename := dir.Name()
 	if !dir.IsDir() && isExtSupported(filename) {
-		fullPath := f.cwd.directory + "/" + dir.Name()
+		fullPath := f.cwdDetails.directory + "/" + dir.Name()
 
 		go func() {
 			imageString, err := preview.ImagePreview(f.viewport.Width-4, fullPath)
