@@ -1,11 +1,6 @@
 package chat
 
 import (
-	"os"
-	"os/exec"
-	"slices"
-	"unicode"
-
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -18,6 +13,10 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
+	"os"
+	"os/exec"
+	"slices"
+	"unicode"
 )
 
 type editorCmp struct {
@@ -141,16 +140,24 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		m.attachments = append(m.attachments, msg.Attachment)
-		m.viewport.Height = 2
-		var attachments string
-		for i, attachment := range m.attachments {
-			if i == 0 {
-				attachments += attachment.FileName
+
+		var styledAttachments []string
+		attachmentStyles := styles.BaseStyle.
+			Height(1).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(styles.Primary)
+		m.viewport.Height = 3
+		for _, attachment := range m.attachments {
+			var filename string
+			if len(attachment.FileName) > 10 {
+				filename = "\uf44c " + attachment.FileName[0:7] + "..."
 			} else {
-				attachments += "  " + attachment.FileName
+				filename = "\uf44c " + attachment.FileName
 			}
+			styledAttachments = append(styledAttachments, attachmentStyles.Width(len(filename)).Render(filename))
 		}
-		m.viewport.SetContent(attachments)
+		content := lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
+		m.viewport.SetContent(content)
 	case tea.KeyMsg:
 		if key.Matches(msg, DeleteKeyMaps.AttachmentDeleteMode) {
 			m.deleteMode = true
@@ -246,7 +253,7 @@ func NewEditorCmp(app *app.App) tea.Model {
 	ti.FocusedStyle.Text = ti.BlurredStyle.Text.Background(styles.Background)
 	ti.CharLimit = -1
 	ti.Focus()
-	vi := viewport.New(0, 0)
+	vi := viewport.New(200, 0)
 	vi.Style.Background(styles.Background).Foreground(styles.Forground)
 	return &editorCmp{
 		app:      app,

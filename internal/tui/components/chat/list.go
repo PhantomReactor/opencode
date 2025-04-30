@@ -35,6 +35,7 @@ type messagesCmp struct {
 	cachedContent map[string]cacheItem
 	spinner       spinner.Model
 	rendering     bool
+	attachments   viewport.Model
 }
 type renderFinishedMsg struct{}
 
@@ -225,39 +226,37 @@ func (m *messagesCmp) renderView() {
 	}
 
 	messages := make([]string, 0)
+	var attahmentContent string
 	for _, v := range m.uiMessages {
 		if v.attachmentPaths != "" {
-			var attachments strings.Builder
-			attachmentPaths := strings.Split(v.attachmentPaths, "\n")
-			attachments.WriteString("Attachments: ")
-			for i, attachmentPath := range attachmentPaths {
-				filename := filepath.Base(attachmentPath)
-				if i == 0 {
-					attachments.WriteString(filename)
-				} else {
-					attachments.WriteString("  " + filename)
+			var styledAttachments []string
+			attachmentStyles := styles.BaseStyle.
+				Height(1).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(styles.Primary)
+
+			attachmentPaths := strings.SplitSeq(v.attachmentPaths, "\n")
+			for attachment := range attachmentPaths {
+				filename := filepath.Base(attachment)
+				if len(filename) > 10 {
+					filename = "\uf44c " + filename[0:7] + "..."
 				}
-				if i == len(attachmentPaths)-1 {
-					attachments.WriteString("\n")
-				}
+				styledAttachments = append(styledAttachments, attachmentStyles.Width(len(filename)).Render(filename))
 			}
-			messages = append(messages, attachments.String()+v.content,
-				styles.BaseStyle.
-					Width(m.width).
-					Render(
-						"",
-					),
-			)
-		} else {
-			messages = append(messages, v.content,
-				styles.BaseStyle.
-					Width(m.width).
-					Render(
-						"",
-					),
-			)
+			attahmentContent = lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 		}
+		m.attachments.SetContent(attahmentContent)
+
+		messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, lipgloss.NewStyle().Background(styles.Background).Render(m.attachments.View()), v.content),
+			styles.BaseStyle.
+				Width(m.width).
+				Render(
+					"",
+				),
+		)
+		attahmentContent = ""
 	}
+
 	m.viewport.SetContent(
 		styles.BaseStyle.
 			Width(m.width).
@@ -417,6 +416,8 @@ func (m *messagesCmp) SetSize(width, height int) tea.Cmd {
 	m.height = height
 	m.viewport.Width = width
 	m.viewport.Height = height - 2
+	m.attachments.Width = width + 40
+	m.attachments.Height = 3
 	for _, msg := range m.messages {
 		delete(m.cachedContent, msg.ID)
 	}
@@ -463,6 +464,7 @@ func NewMessagesCmp(app *app.App) tea.Model {
 	s := spinner.New()
 	s.Spinner = spinner.Pulse
 	vp := viewport.New(0, 0)
+	attachmets := viewport.New(0, 0)
 	vp.KeyMap.PageUp = messageKeys.PageUp
 	vp.KeyMap.PageDown = messageKeys.PageDown
 	vp.KeyMap.HalfPageUp = messageKeys.HalfPageUp
@@ -472,5 +474,6 @@ func NewMessagesCmp(app *app.App) tea.Model {
 		cachedContent: make(map[string]cacheItem),
 		viewport:      vp,
 		spinner:       s,
+		attachments:   attachmets,
 	}
 }
