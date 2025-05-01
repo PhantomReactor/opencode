@@ -710,7 +710,7 @@ func New(app *app.App) tea.Model {
 			page.ChatPage: page.NewChatPage(app),
 			page.LogsPage: page.NewLogsPage(),
 		},
-		filepicker: chat.NewFilepickerCmp(),
+		filepicker: chat.NewFilepickerCmp(app),
 	}
 
 	model.RegisterCommand(dialog.Command{

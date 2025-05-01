@@ -2,22 +2,26 @@ package chat
 
 import (
 	"fmt"
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
-	"github.com/opencode-ai/opencode/internal/logging"
-	"github.com/opencode-ai/opencode/internal/message"
-	"github.com/opencode-ai/opencode/internal/preview"
-	"github.com/opencode-ai/opencode/internal/tui/styles"
-	"github.com/opencode-ai/opencode/internal/tui/util"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/opencode-ai/opencode/internal/app"
+	"github.com/opencode-ai/opencode/internal/config"
+	"github.com/opencode-ai/opencode/internal/logging"
+	"github.com/opencode-ai/opencode/internal/message"
+	"github.com/opencode-ai/opencode/internal/preview"
+	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
+	"github.com/opencode-ai/opencode/internal/tui/styles"
+	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
 const (
@@ -74,6 +78,7 @@ type filepickerCmp struct {
 	selectedFile   string
 	cwd            textinput.Model
 	ShowFilePicker bool
+	app            *app.App
 }
 
 type DirNode struct {
@@ -107,7 +112,7 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		f.width = 60
 		f.height = 20
 		f.viewport.Width = 80
-		f.viewport.Height = 25
+		f.viewport.Height = 22
 		f.cursor = 0
 		f.getCurrentFileBelowCursor()
 	case tea.KeyMsg:
@@ -156,7 +161,9 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				f.dirs = readDir(path, false)
 				f.cursor = 0
 				f.cwd.SetValue(f.cwdDetails.directory)
+				f.getCurrentFileBelowCursor()
 			} else {
+				f.selectedFile = path
 				return f.addAttachmentToMessage()
 			}
 		case key.Matches(msg, returnKey):
@@ -176,6 +183,7 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					f.dirs = readDir(f.cwdDetails.directory, false)
 					f.cursor = 0
 					f.cwd.SetValue(f.cwdDetails.directory)
+					f.getCurrentFileBelowCursor()
 				}
 			}
 		case key.Matches(msg, backward):
@@ -186,6 +194,7 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					f.cwdDetails.child = nil
 					f.dirs = readDir(f.cwdDetails.directory, false)
 					f.cwd.SetValue(f.cwdDetails.directory)
+					f.getCurrentFileBelowCursor()
 				}
 			}
 		case key.Matches(msg, openFilepiceker):
@@ -201,6 +210,12 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (f *filepickerCmp) addAttachmentToMessage() (tea.Model, tea.Cmd) {
+
+	modeInfo := dialog.GetSelectedModel(config.Get())
+	if !modeInfo.SupportsAttachments {
+		logging.ErrorPersist(fmt.Sprintf("Model %s doesn't support attachments", modeInfo.Name))
+		return f, nil
+	}
 	if isExtSupported(f.dirs[f.cursor].Name()) {
 		f.selectedFile = f.dirs[f.cursor].Name()
 		selectedFilePath := f.cwdDetails.directory + "/" + f.selectedFile
@@ -292,16 +307,16 @@ func (f *filepickerCmp) View() string {
 	}
 
 	currentPath := styles.BaseStyle.
-		PaddingBottom(1).
 		Height(1).
 		Width(adjustedWidth).
 		Render(f.cwd.View())
 
 	viewportstyle := lipgloss.NewStyle().
-		Width(f.viewport.Width - 2).
+		Width(f.viewport.Width).
 		Background(styles.Background).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(styles.ForgroundDim).
+		BorderBackground(styles.Background).
 		Padding(2).
 		Render(f.viewport.View())
 	var insertExitText string
@@ -344,7 +359,7 @@ func (f *filepickerCmp) IsCWDFocused() bool {
 	return f.cwd.Focused()
 }
 
-func NewFilepickerCmp() FilepickerCmp {
+func NewFilepickerCmp(app *app.App) FilepickerCmp {
 	homepath, err := os.UserHomeDir()
 	if err != nil {
 		logging.Error("error loading user files")
@@ -358,7 +373,7 @@ func NewFilepickerCmp() FilepickerCmp {
 	currentDirectory.Width = 44
 	currentDirectory.Cursor.Blink = true
 	currentDirectory.SetValue(baseDir.directory)
-	return &filepickerCmp{cwdDetails: &baseDir, dirs: dirs, cursorChain: make(stack, 0), viewport: viewport, cwd: currentDirectory}
+	return &filepickerCmp{cwdDetails: &baseDir, dirs: dirs, cursorChain: make(stack, 0), viewport: viewport, cwd: currentDirectory, app: app}
 }
 
 func (f *filepickerCmp) getCurrentFileBelowCursor() {
@@ -376,7 +391,7 @@ func (f *filepickerCmp) getCurrentFileBelowCursor() {
 		go func() {
 			imageString, err := preview.ImagePreview(f.viewport.Width-4, fullPath)
 			if err != nil {
-				logging.ErrorPersist(err.Error())
+				logging.Error(err.Error())
 				f.viewport.SetContent("Preview unavailable")
 				return
 			}
@@ -421,7 +436,9 @@ func readDir(path string, showHidden bool) []os.DirEntry {
 		for _, dirEntry := range dirEntries {
 			isHidden, _ := IsHidden(dirEntry.Name())
 			if !isHidden {
-				sanitizedDirEntries = append(sanitizedDirEntries, dirEntry)
+				if dirEntry.IsDir() || isExtSupported(dirEntry.Name()) {
+					sanitizedDirEntries = append(sanitizedDirEntries, dirEntry)
+				}
 			}
 		}
 

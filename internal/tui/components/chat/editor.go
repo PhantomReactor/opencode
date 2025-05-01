@@ -1,6 +1,12 @@
 package chat
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"slices"
+	"unicode"
+
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -13,10 +19,6 @@ import (
 	"github.com/opencode-ai/opencode/internal/tui/layout"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
 	"github.com/opencode-ai/opencode/internal/tui/util"
-	"os"
-	"os/exec"
-	"slices"
-	"unicode"
 )
 
 type editorCmp struct {
@@ -64,6 +66,10 @@ var DeleteKeyMaps = DeleteAttachmentKeyMaps{
 		key.WithHelp("ctrl+r+r", "delete all attchments"),
 	),
 }
+
+const (
+	maxAttachments = 5
+)
 
 func (m *editorCmp) openEditor() tea.Cmd {
 	editor := os.Getenv("EDITOR")
@@ -135,8 +141,8 @@ func (m *editorCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case AttachmentAddedMsg:
-		if len(m.attachments) >= 10 {
-			logging.Error("cannot add more than 10 images")
+		if len(m.attachments) >= maxAttachments {
+			logging.ErrorPersist(fmt.Sprintf("cannot add more than %d images", maxAttachments))
 			return m, cmd
 		}
 		m.attachments = append(m.attachments, msg.Attachment)

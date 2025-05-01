@@ -227,6 +227,7 @@ func (m *messagesCmp) renderView() {
 
 	messages := make([]string, 0)
 	var attahmentContent string
+	var styledAttachment string
 	for _, v := range m.uiMessages {
 		if v.attachmentPaths != "" {
 			var styledAttachments []string
@@ -244,17 +245,28 @@ func (m *messagesCmp) renderView() {
 				styledAttachments = append(styledAttachments, attachmentStyles.Width(len(filename)).Render(filename))
 			}
 			attahmentContent = lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
+			m.attachments.SetContent(attahmentContent)
+			styledAttachment = lipgloss.NewStyle().Background(styles.Background).Render(m.attachments.View())
 		}
-		m.attachments.SetContent(attahmentContent)
-
-		messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, lipgloss.NewStyle().Background(styles.Background).Render(m.attachments.View()), v.content),
-			styles.BaseStyle.
-				Width(m.width).
-				Render(
-					"",
-				),
-		)
+		if len(styledAttachment) > 0 {
+			messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, styledAttachment, v.content),
+				styles.BaseStyle.
+					Width(m.width).
+					Render(
+						"",
+					),
+			)
+		} else {
+			messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, v.content),
+				styles.BaseStyle.
+					Width(m.width).
+					Render(
+						"",
+					),
+			)
+		}
 		attahmentContent = ""
+		styledAttachment = ""
 	}
 
 	m.viewport.SetContent(
