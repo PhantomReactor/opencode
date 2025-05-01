@@ -28,6 +28,7 @@ type keyMap struct {
 	Commands      key.Binding
 	Filepicker    key.Binding
 	Models        key.Binding
+	SwitchTheme   key.Binding
 }
 
 var keys = keyMap{
@@ -46,8 +47,8 @@ var keys = keyMap{
 	),
 
 	SwitchSession: key.NewBinding(
-		key.WithKeys("ctrl+a"),
-		key.WithHelp("ctrl+a", "switch session"),
+		key.WithKeys("ctrl+s"),
+		key.WithHelp("ctrl+s", "switch session"),
 	),
 
 	Commands: key.NewBinding(
@@ -62,6 +63,11 @@ var keys = keyMap{
 		key.WithKeys("ctrl+o"),
 		key.WithHelp("ctrl+o", "model selection"),
 	),
+
+	SwitchTheme: key.NewBinding(
+		key.WithKeys("ctrl+t"),
+		key.WithHelp("ctrl+t", "switch theme"),
+	),
 }
 
 var helpEsc = key.NewBinding(
@@ -75,8 +81,8 @@ var returnKey = key.NewBinding(
 )
 
 var logsKeyReturnKey = key.NewBinding(
-	key.WithKeys("backspace", "q"),
-	key.WithHelp("backspace/q", "go back"),
+	key.WithKeys("esc", "backspace", "q"),
+	key.WithHelp("esc/q", "go back"),
 )
 
 type appModel struct {
@@ -112,6 +118,9 @@ type appModel struct {
 
 	showFilepicker bool
 	filepicker     chat.FilepickerCmp
+
+	showThemeDialog bool
+	themeDialog     dialog.ThemeDialog
 }
 
 func (a appModel) Init() tea.Cmd {
@@ -134,6 +143,7 @@ func (a appModel) Init() tea.Cmd {
 	cmd = a.initDialog.Init()
 	cmds = append(cmds, cmd)
 	cmd = a.filepicker.Init()
+	cmd = a.themeDialog.Init()
 	cmds = append(cmds, cmd)
 
 	// Check if we should show the init dialog
@@ -268,6 +278,15 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.showCommandDialog = false
 		return a, nil
 
+	case dialog.CloseThemeDialogMsg:
+		a.showThemeDialog = false
+		return a, nil
+
+	case dialog.ThemeChangedMsg:
+		a.pages[a.currentPage], cmd = a.pages[a.currentPage].Update(msg)
+		a.showThemeDialog = false
+		return a, tea.Batch(cmd, util.ReportInfo("Theme changed to: "+msg.ThemeName))
+
 	case dialog.CloseModelDialogMsg:
 		a.showModelDialog = false
 		return a, nil
@@ -362,7 +381,7 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		case key.Matches(msg, keys.Commands):
-			if a.currentPage == page.ChatPage && !a.showQuit && !a.showPermissions && !a.showSessionDialog {
+			if a.currentPage == page.ChatPage && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showThemeDialog && !a.showFilepicker {
 				// Show commands dialog
 				if len(a.commands) == 0 {
 					return a, util.ReportWarn("No commands available")
@@ -377,18 +396,25 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.showModelDialog = false
 				return a, nil
 			}
-
 			if a.currentPage == page.ChatPage && !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showCommandDialog {
 				a.showModelDialog = true
 				return a, nil
 			}
 			return a, nil
-		case key.Matches(msg, logsKeyReturnKey):
-			if a.currentPage == page.LogsPage {
-				return a, a.moveToPage(page.ChatPage)
+		case key.Matches(msg, keys.SwitchTheme):
+			if !a.showQuit && !a.showPermissions && !a.showSessionDialog && !a.showCommandDialog {
+				// Show theme switcher dialog
+				a.showThemeDialog = true
+				// Theme list is dynamically loaded by the dialog component
+				return a, a.themeDialog.Init()
 			}
-		case key.Matches(msg, returnKey):
-			if !a.filepicker.IsCWDFocused() {
+			return a, nil
+		case key.Matches(msg, returnKey) || key.Matches(msg, logsKeyReturnKey):
+			if msg.String() == "q" {
+				if a.currentPage == page.LogsPage {
+					return a, a.moveToPage(page.ChatPage)
+				}
+			} else if !a.filepicker.IsCWDFocused() {
 				if a.showQuit {
 					a.showQuit = !a.showQuit
 					return a, nil
@@ -409,6 +435,9 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					a.showFilepicker = false
 					a.filepicker.ToggleFilepicker(a.showFilepicker)
 					return a, nil
+				}
+				if a.currentPage == page.LogsPage {
+					return a, a.moveToPage(page.ChatPage)
 				}
 			}
 		case key.Matches(msg, keys.Logs):
@@ -507,6 +536,17 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(cmds...)
 		}
 	}
+
+	if a.showThemeDialog {
+		d, themeCmd := a.themeDialog.Update(msg)
+		a.themeDialog = d.(dialog.ThemeDialog)
+		cmds = append(cmds, themeCmd)
+		// Only block key messages send all other messages down
+		if _, ok := msg.(tea.KeyMsg); ok {
+			return a, tea.Batch(cmds...)
+		}
+	}
+
 	s, _ := a.status.Update(msg)
 	a.status = s.(core.StatusCmp)
 	a.pages[a.currentPage], cmd = a.pages[a.currentPage].Update(msg)
@@ -582,9 +622,9 @@ func (a appModel) View() string {
 	}
 
 	if !a.app.CoderAgent.IsBusy() {
-		a.status.SetHelpMsg("ctrl+? help")
+		a.status.SetHelpWidgetMsg("ctrl+? help")
 	} else {
-		a.status.SetHelpMsg("? help")
+		a.status.SetHelpWidgetMsg("? help")
 	}
 
 	if a.showHelp {
@@ -688,6 +728,21 @@ func (a appModel) View() string {
 		)
 	}
 
+	if a.showThemeDialog {
+		overlay := a.themeDialog.View()
+		row := lipgloss.Height(appView) / 2
+		row -= lipgloss.Height(overlay) / 2
+		col := lipgloss.Width(appView) / 2
+		col -= lipgloss.Width(overlay) / 2
+		appView = layout.PlaceOverlay(
+			col,
+			row,
+			overlay,
+			appView,
+			true,
+		)
+	}
+
 	return appView
 }
 
@@ -704,6 +759,7 @@ func New(app *app.App) tea.Model {
 		modelDialog:   dialog.NewModelDialogCmp(),
 		permissions:   dialog.NewPermissionDialogCmp(),
 		initDialog:    dialog.NewInitDialogCmp(),
+		themeDialog:   dialog.NewThemeDialogCmp(),
 		app:           app,
 		commands:      []dialog.Command{},
 		pages: map[page.PageID]tea.Model{

@@ -2,9 +2,11 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/opencode-ai/opencode/internal/llm/models"
@@ -65,6 +67,11 @@ type LSPConfig struct {
 	Options  any      `json:"options"`
 }
 
+// TUIConfig defines the configuration for the Terminal User Interface.
+type TUIConfig struct {
+	Theme string `json:"theme,omitempty"`
+}
+
 // Config is the main configuration structure for the application.
 type Config struct {
 	Data         Data                              `json:"data"`
@@ -76,6 +83,7 @@ type Config struct {
 	Debug        bool                              `json:"debug,omitempty"`
 	DebugLSP     bool                              `json:"debugLSP,omitempty"`
 	ContextPaths []string                          `json:"contextPaths,omitempty"`
+	TUI          TUIConfig                         `json:"tui"`
 }
 
 // Application constants
@@ -121,7 +129,6 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	configureViper()
 	setDefaults(debug)
-	setProviderDefaults()
 
 	// Read global config
 	if err := readConfig(viper.ReadInConfig()); err != nil {
@@ -130,6 +137,8 @@ func Load(workingDir string, debug bool) (*Config, error) {
 
 	// Load and merge local config
 	mergeLocalConfig(workingDir)
+
+	setProviderDefaults()
 
 	// Apply configuration to the struct
 	if err := viper.Unmarshal(cfg); err != nil {
@@ -203,6 +212,7 @@ func configureViper() {
 func setDefaults(debug bool) {
 	viper.SetDefault("data.directory", defaultDataDirectory)
 	viper.SetDefault("contextPaths", defaultContextPaths)
+	viper.SetDefault("tui.theme", "opencode")
 
 	if debug {
 		viper.SetDefault("debug", true)
@@ -213,7 +223,8 @@ func setDefaults(debug bool) {
 	}
 }
 
-// setProviderDefaults configures LLM provider defaults based on environment variables.
+// setProviderDefaults configures LLM provider defaults based on provider provided by
+// environment variables and configuration file.
 func setProviderDefaults() {
 	// Set all API keys we can find in the environment
 	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
@@ -228,15 +239,28 @@ func setProviderDefaults() {
 	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
 		viper.SetDefault("providers.groq.apiKey", apiKey)
 	}
+	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
+		viper.SetDefault("providers.openrouter.apiKey", apiKey)
+	}
+	if apiKey := os.Getenv("XAI_API_KEY"); apiKey != "" {
+		viper.SetDefault("providers.xai.apiKey", apiKey)
+	}
+	if apiKey := os.Getenv("AZURE_OPENAI_ENDPOINT"); apiKey != "" {
+		// api-key may be empty when using Entra ID credentials – that's okay
+		viper.SetDefault("providers.azure.apiKey", os.Getenv("AZURE_OPENAI_API_KEY"))
+	}
 
 	// Use this order to set the default models
 	// 1. Anthropic
 	// 2. OpenAI
 	// 3. Google Gemini
 	// 4. Groq
-	// 5. AWS Bedrock
+	// 5. OpenRouter
+	// 6. AWS Bedrock
+	// 7. Azure
+
 	// Anthropic configuration
-	if apiKey := os.Getenv("ANTHROPIC_API_KEY"); apiKey != "" {
+	if viper.Get("providers.anthropic.apiKey") != "" {
 		viper.SetDefault("agents.coder.model", models.Claude37Sonnet)
 		viper.SetDefault("agents.task.model", models.Claude37Sonnet)
 		viper.SetDefault("agents.title.model", models.Claude37Sonnet)
@@ -244,7 +268,7 @@ func setProviderDefaults() {
 	}
 
 	// OpenAI configuration
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+	if viper.Get("providers.openai.apiKey") != "" {
 		viper.SetDefault("agents.coder.model", models.GPT41)
 		viper.SetDefault("agents.task.model", models.GPT41Mini)
 		viper.SetDefault("agents.title.model", models.GPT41Mini)
@@ -252,7 +276,7 @@ func setProviderDefaults() {
 	}
 
 	// Google Gemini configuration
-	if apiKey := os.Getenv("GEMINI_API_KEY"); apiKey != "" {
+	if viper.Get("providers.google.gemini.apiKey") != "" {
 		viper.SetDefault("agents.coder.model", models.Gemini25)
 		viper.SetDefault("agents.task.model", models.Gemini25Flash)
 		viper.SetDefault("agents.title.model", models.Gemini25Flash)
@@ -260,10 +284,25 @@ func setProviderDefaults() {
 	}
 
 	// Groq configuration
-	if apiKey := os.Getenv("GROQ_API_KEY"); apiKey != "" {
+	if viper.Get("providers.groq.apiKey") != "" {
 		viper.SetDefault("agents.coder.model", models.QWENQwq)
 		viper.SetDefault("agents.task.model", models.QWENQwq)
 		viper.SetDefault("agents.title.model", models.QWENQwq)
+		return
+	}
+
+	// OpenRouter configuration
+	if viper.Get("providers.openrouter.apiKey") != "" {
+		viper.SetDefault("agents.coder.model", models.OpenRouterClaude37Sonnet)
+		viper.SetDefault("agents.task.model", models.OpenRouterClaude37Sonnet)
+		viper.SetDefault("agents.title.model", models.OpenRouterClaude35Haiku)
+		return
+	}
+
+	if viper.Get("providers.xai.apiKey") != "" {
+		viper.SetDefault("agents.coder.model", models.XAIGrok3Beta)
+		viper.SetDefault("agents.task.model", models.XAIGrok3Beta)
+		viper.SetDefault("agents.title.model", models.XAiGrok3MiniFastBeta)
 		return
 	}
 
@@ -276,8 +315,6 @@ func setProviderDefaults() {
 	}
 
 	if os.Getenv("AZURE_OPENAI_ENDPOINT") != "" {
-		// api-key may be empty when using Entra ID credentials – that's okay
-		viper.SetDefault("providers.azure.apiKey", os.Getenv("AZURE_OPENAI_API_KEY"))
 		viper.SetDefault("agents.coder.model", models.AzureGPT41)
 		viper.SetDefault("agents.task.model", models.AzureGPT41Mini)
 		viper.SetDefault("agents.title.model", models.AzureGPT41Mini)
@@ -527,6 +564,8 @@ func getProviderAPIKey(provider models.ModelProvider) string {
 		return os.Getenv("GROQ_API_KEY")
 	case models.ProviderAzure:
 		return os.Getenv("AZURE_OPENAI_API_KEY")
+	case models.ProviderOpenRouter:
+		return os.Getenv("OPENROUTER_API_KEY")
 	case models.ProviderBedrock:
 		if hasAWSCredentials() {
 			return "aws-credentials-available"
@@ -563,6 +602,34 @@ func setDefaultModelForAgent(agent AgentName) bool {
 			model = models.GPT41Mini
 		default:
 			model = models.GPT41
+		}
+
+		// Check if model supports reasoning
+		if modelInfo, ok := models.SupportedModels[model]; ok && modelInfo.CanReason {
+			reasoningEffort = "medium"
+		}
+
+		cfg.Agents[agent] = Agent{
+			Model:           model,
+			MaxTokens:       maxTokens,
+			ReasoningEffort: reasoningEffort,
+		}
+		return true
+	}
+
+	if apiKey := os.Getenv("OPENROUTER_API_KEY"); apiKey != "" {
+		var model models.ModelID
+		maxTokens := int64(5000)
+		reasoningEffort := ""
+
+		switch agent {
+		case AgentTitle:
+			model = models.OpenRouterClaude35Haiku
+			maxTokens = 80
+		case AgentTask:
+			model = models.OpenRouterClaude37Sonnet
+		default:
+			model = models.OpenRouterClaude37Sonnet
 		}
 
 		// Check if model supports reasoning
@@ -668,6 +735,65 @@ func UpdateAgentModel(agentName AgentName, modelID models.ModelID) error {
 		// revert config update on failure
 		cfg.Agents[agentName] = existingAgentCfg
 		return fmt.Errorf("failed to update agent model: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateTheme updates the theme in the configuration and writes it to the config file.
+func UpdateTheme(themeName string) error {
+	if cfg == nil {
+		return fmt.Errorf("config not loaded")
+	}
+
+	// Update the in-memory config
+	cfg.TUI.Theme = themeName
+
+	// Get the config file path
+	configFile := viper.ConfigFileUsed()
+	var configData []byte
+	if configFile == "" {
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		configFile = filepath.Join(homeDir, fmt.Sprintf(".%s.json", appName))
+		logging.Info("config file not found, creating new one", "path", configFile)
+		configData = []byte(`{}`)
+	} else {
+		// Read the existing config file
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			return fmt.Errorf("failed to read config file: %w", err)
+		}
+		configData = data
+	}
+
+	// Parse the JSON
+	var configMap map[string]interface{}
+	if err := json.Unmarshal(configData, &configMap); err != nil {
+		return fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Update just the theme value
+	tuiConfig, ok := configMap["tui"].(map[string]interface{})
+	if !ok {
+		// TUI config doesn't exist yet, create it
+		configMap["tui"] = map[string]interface{}{"theme": themeName}
+	} else {
+		// Update existing TUI config
+		tuiConfig["theme"] = themeName
+		configMap["tui"] = tuiConfig
+	}
+
+	// Write the updated config back to file
+	updatedData, err := json.MarshalIndent(configMap, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(configFile, updatedData, 0o644); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
 	}
 
 	return nil

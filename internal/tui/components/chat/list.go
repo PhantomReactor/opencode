@@ -16,7 +16,9 @@ import (
 	"github.com/opencode-ai/opencode/internal/message"
 	"github.com/opencode-ai/opencode/internal/pubsub"
 	"github.com/opencode-ai/opencode/internal/session"
+	"github.com/opencode-ai/opencode/internal/tui/components/dialog"
 	"github.com/opencode-ai/opencode/internal/tui/styles"
+	"github.com/opencode-ai/opencode/internal/tui/theme"
 	"github.com/opencode-ai/opencode/internal/tui/util"
 )
 
@@ -72,7 +74,9 @@ func (m *messagesCmp) Init() tea.Cmd {
 func (m *messagesCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	switch msg := msg.(type) {
-
+	case dialog.ThemeChangedMsg:
+		m.rerender()
+		return m, nil
 	case SessionSelectedMsg:
 		if msg.ID != m.session.ID {
 			cmd := m.SetSession(msg)
@@ -177,6 +181,7 @@ func formatTimeDifference(unixTime1, unixTime2 int64) string {
 func (m *messagesCmp) renderView() {
 	m.uiMessages = make([]uiMessage, 0)
 	pos := 0
+	baseStyle := styles.BaseStyle()
 
 	if m.width == 0 {
 		return
@@ -228,13 +233,14 @@ func (m *messagesCmp) renderView() {
 	messages := make([]string, 0)
 	var attahmentContent string
 	var styledAttachment string
+	t := theme.CurrentTheme()
 	for _, v := range m.uiMessages {
 		if v.attachmentPaths != "" {
 			var styledAttachments []string
-			attachmentStyles := styles.BaseStyle.
+			attachmentStyles := styles.BaseStyle().
 				Height(1).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(styles.Primary)
+				BorderForeground(t.Text())
 
 			attachmentPaths := strings.SplitSeq(v.attachmentPaths, "\n")
 			for attachment := range attachmentPaths {
@@ -246,11 +252,11 @@ func (m *messagesCmp) renderView() {
 			}
 			attahmentContent = lipgloss.JoinHorizontal(lipgloss.Left, styledAttachments...)
 			m.attachments.SetContent(attahmentContent)
-			styledAttachment = lipgloss.NewStyle().Background(styles.Background).Render(m.attachments.View())
+			styledAttachment = lipgloss.NewStyle().Background(t.Background()).Render(m.attachments.View())
 		}
 		if len(styledAttachment) > 0 {
 			messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, styledAttachment, v.content),
-				styles.BaseStyle.
+				baseStyle.
 					Width(m.width).
 					Render(
 						"",
@@ -258,7 +264,7 @@ func (m *messagesCmp) renderView() {
 			)
 		} else {
 			messages = append(messages, lipgloss.JoinVertical(lipgloss.Left, v.content),
-				styles.BaseStyle.
+				baseStyle.
 					Width(m.width).
 					Render(
 						"",
@@ -270,7 +276,7 @@ func (m *messagesCmp) renderView() {
 	}
 
 	m.viewport.SetContent(
-		styles.BaseStyle.
+		baseStyle.
 			Width(m.width).
 			Render(
 				lipgloss.JoinVertical(
@@ -282,8 +288,10 @@ func (m *messagesCmp) renderView() {
 }
 
 func (m *messagesCmp) View() string {
+	baseStyle := styles.BaseStyle()
+
 	if m.rendering {
-		return styles.BaseStyle.
+		return baseStyle.
 			Width(m.width).
 			Render(
 				lipgloss.JoinVertical(
@@ -295,14 +303,14 @@ func (m *messagesCmp) View() string {
 			)
 	}
 	if len(m.messages) == 0 {
-		content := styles.BaseStyle.
+		content := baseStyle.
 			Width(m.width).
 			Height(m.height - 1).
 			Render(
 				m.initialScreen(),
 			)
 
-		return styles.BaseStyle.
+		return baseStyle.
 			Width(m.width).
 			Render(
 				lipgloss.JoinVertical(
@@ -314,7 +322,7 @@ func (m *messagesCmp) View() string {
 			)
 	}
 
-	return styles.BaseStyle.
+	return baseStyle.
 		Width(m.width).
 		Render(
 			lipgloss.JoinVertical(
@@ -365,6 +373,9 @@ func hasUnfinishedToolCalls(messages []message.Message) bool {
 func (m *messagesCmp) working() string {
 	text := ""
 	if m.IsAgentWorking() && len(m.messages) > 0 {
+		t := theme.CurrentTheme()
+		baseStyle := styles.BaseStyle()
+
 		task := "Thinking..."
 		lastMessage := m.messages[len(m.messages)-1]
 		if hasToolsWithoutResponse(m.messages) {
@@ -375,42 +386,49 @@ func (m *messagesCmp) working() string {
 			task = "Generating..."
 		}
 		if task != "" {
-			text += styles.BaseStyle.Width(m.width).Foreground(styles.PrimaryColor).Bold(true).Render(
-				fmt.Sprintf("%s %s ", m.spinner.View(), task),
-			)
+			text += baseStyle.
+				Width(m.width).
+				Foreground(t.Primary()).
+				Bold(true).
+				Render(fmt.Sprintf("%s %s ", m.spinner.View(), task))
 		}
 	}
 	return text
 }
 
 func (m *messagesCmp) help() string {
+	t := theme.CurrentTheme()
+	baseStyle := styles.BaseStyle()
+
 	text := ""
 
 	if m.app.CoderAgent.IsBusy() {
 		text += lipgloss.JoinHorizontal(
 			lipgloss.Left,
-			styles.BaseStyle.Foreground(styles.ForgroundDim).Bold(true).Render("press "),
-			styles.BaseStyle.Foreground(styles.Forground).Bold(true).Render("esc"),
-			styles.BaseStyle.Foreground(styles.ForgroundDim).Bold(true).Render(" to exit cancel"),
+			baseStyle.Foreground(t.TextMuted()).Bold(true).Render("press "),
+			baseStyle.Foreground(t.Text()).Bold(true).Render("esc"),
+			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" to exit cancel"),
 		)
 	} else {
 		text += lipgloss.JoinHorizontal(
 			lipgloss.Left,
-			styles.BaseStyle.Foreground(styles.ForgroundDim).Bold(true).Render("press "),
-			styles.BaseStyle.Foreground(styles.Forground).Bold(true).Render("enter"),
-			styles.BaseStyle.Foreground(styles.ForgroundDim).Bold(true).Render(" to send the message,"),
-			styles.BaseStyle.Foreground(styles.ForgroundDim).Bold(true).Render(" write"),
-			styles.BaseStyle.Foreground(styles.Forground).Bold(true).Render(" \\"),
-			styles.BaseStyle.Foreground(styles.ForgroundDim).Bold(true).Render(" and enter to add a new line"),
+			baseStyle.Foreground(t.TextMuted()).Bold(true).Render("press "),
+			baseStyle.Foreground(t.Text()).Bold(true).Render("enter"),
+			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" to send the message,"),
+			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" write"),
+			baseStyle.Foreground(t.Text()).Bold(true).Render(" \\"),
+			baseStyle.Foreground(t.TextMuted()).Bold(true).Render(" and enter to add a new line"),
 		)
 	}
-	return styles.BaseStyle.
+	return baseStyle.
 		Width(m.width).
 		Render(text)
 }
 
 func (m *messagesCmp) initialScreen() string {
-	return styles.BaseStyle.Width(m.width).Render(
+	baseStyle := styles.BaseStyle()
+
+	return baseStyle.Width(m.width).Render(
 		lipgloss.JoinVertical(
 			lipgloss.Top,
 			header(m.width),
@@ -418,6 +436,13 @@ func (m *messagesCmp) initialScreen() string {
 			lspsConfigured(m.width),
 		),
 	)
+}
+
+func (m *messagesCmp) rerender() {
+	for _, msg := range m.messages {
+		delete(m.cachedContent, msg.ID)
+	}
+	m.renderView()
 }
 
 func (m *messagesCmp) SetSize(width, height int) tea.Cmd {
@@ -430,11 +455,7 @@ func (m *messagesCmp) SetSize(width, height int) tea.Cmd {
 	m.viewport.Height = height - 2
 	m.attachments.Width = width + 40
 	m.attachments.Height = 3
-	for _, msg := range m.messages {
-		delete(m.cachedContent, msg.ID)
-	}
-	m.uiMessages = make([]uiMessage, 0)
-	m.renderView()
+	m.rerender()
 	return nil
 }
 
