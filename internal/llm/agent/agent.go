@@ -217,32 +217,13 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 			}
 		}()
 	}
-	var messagesWithoutAttachments []message.Message
-	for _, msg := range msgs {
-		nonBinaryParts := make([]message.ContentPart, 0)
-		for _, part := range msg.Parts {
-			if _, ok := part.(message.BinaryContent); !ok {
-				nonBinaryParts = append(nonBinaryParts, part)
-			}
-		}
-
-		if len(nonBinaryParts) > 0 {
-			msgCopy := msg
-			msgCopy.Parts = nonBinaryParts
-			if msgCopy.Parts != nil && len(msgCopy.Parts) > 0 && msgCopy.Content().Text != "" {
-				messagesWithoutAttachments = append(messagesWithoutAttachments, msgCopy)
-			}
-		}
-	}
 
 	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts, attachmentPaths)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))
 	}
-
 	// Append the new user message to the conversation history.
 	msgHistory := append(msgs, userMsg)
-	messagesWithoutAttachments = append(messagesWithoutAttachments, userMsg)
 
 	for {
 		// Check for cancellation before each iteration
@@ -252,7 +233,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		default:
 			// Continue processing
 		}
-		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, messagesWithoutAttachments)
+		agentMessage, toolResults, err := a.streamAndHandleEvents(ctx, sessionID, msgHistory)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				agentMessage.AddFinish(message.FinishReasonCanceled)
@@ -344,7 +325,6 @@ func (a *agent) streamAndHandleEvents(ctx context.Context, sessionID string, msg
 				}
 				continue
 			}
-
 			toolResult, toolErr := tool.Run(ctx, tools.ToolCall{
 				ID:    toolCall.ID,
 				Name:  toolCall.Name,
