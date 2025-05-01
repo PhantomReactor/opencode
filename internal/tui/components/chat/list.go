@@ -240,7 +240,7 @@ func (m *messagesCmp) renderView() {
 			attachmentStyles := styles.BaseStyle().
 				Height(1).
 				Border(lipgloss.RoundedBorder()).
-				BorderForeground(t.Text())
+				BorderForeground(t.Primary())
 
 			attachmentPaths := strings.SplitSeq(v.attachmentPaths, "\n")
 			for attachment := range attachmentPaths {
