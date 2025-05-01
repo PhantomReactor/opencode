@@ -158,8 +158,7 @@ func (a *agent) err(err error) AgentEvent {
 
 func (a *agent) Run(ctx context.Context, sessionID string, content string, attachments ...message.Attachment) (<-chan AgentEvent, error) {
 	if !a.provider.Model().SupportsAttachments && attachments != nil {
-		errorMessage := fmt.Errorf("Model %s does not support attachments", a.provider.Model().Name)
-		return nil, errorMessage
+		attachments = nil
 	}
 	events := make(chan AgentEvent)
 	if a.IsSessionBusy(sessionID) {
