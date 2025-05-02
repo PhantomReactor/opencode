@@ -27,17 +27,19 @@ import (
 
 const (
 	maxAttachmentSize = int64(5 * 1024 * 1024)
+	downArrow         = "down"
+	upArrow           = "up"
 )
 
 var enterKey = key.NewBinding(
 	key.WithKeys("enter"),
 )
 var down = key.NewBinding(
-	key.WithKeys("j", "down"),
+	key.WithKeys("j", downArrow),
 )
 
 var up = key.NewBinding(
-	key.WithKeys("k", "up"),
+	key.WithKeys("k", upArrow),
 )
 var forward = key.NewBinding(
 	key.WithKeys("l"),
@@ -126,14 +128,14 @@ func (f *filepickerCmp) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				f.cwd.Blur()
 			}
 		case key.Matches(msg, down):
-			if !f.cwd.Focused() || msg.String() == "down" {
+			if !f.cwd.Focused() || msg.String() == downArrow {
 				if f.cursor < len(f.dirs)-1 {
 					f.cursor++
 					f.getCurrentFileBelowCursor()
 				}
 			}
 		case key.Matches(msg, up):
-			if !f.cwd.Focused() || msg.String() == "up" {
+			if !f.cwd.Focused() || msg.String() == upArrow {
 				if f.cursor > 0 {
 					f.cursor--
 					f.getCurrentFileBelowCursor()

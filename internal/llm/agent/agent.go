@@ -174,19 +174,11 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 			events <- a.err(fmt.Errorf("panic while running the agent"))
 		})
 		var attachmentParts []message.ContentPart
-		var attachmentPaths strings.Builder
-
-		for i, attachment := range attachments {
-			attachmentParts = append(attachmentParts, message.BinaryContent{MIMEType: attachment.MimeType, Data: attachment.Content})
-			if i == 0 {
-				attachmentPaths.WriteString(attachment.FilePath)
-			} else {
-				attachmentPaths.WriteString("\n")
-				attachmentPaths.WriteString(attachment.FilePath)
-			}
+		for _, attachment := range attachments {
+			attachmentParts = append(attachmentParts, message.BinaryContent{Path: attachment.FilePath, MIMEType: attachment.MimeType, Data: attachment.Content})
 
 		}
-		result := a.processGeneration(genCtx, sessionID, content, attachmentParts, attachmentPaths.String())
+		result := a.processGeneration(genCtx, sessionID, content, attachmentParts)
 		if result.Err() != nil && !errors.Is(result.Err(), ErrRequestCancelled) && !errors.Is(result.Err(), context.Canceled) {
 			logging.ErrorPersist(result.Err().Error())
 		}
@@ -199,7 +191,7 @@ func (a *agent) Run(ctx context.Context, sessionID string, content string, attac
 	return events, nil
 }
 
-func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart, attachmentPaths string) AgentEvent {
+func (a *agent) processGeneration(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) AgentEvent {
 	// List existing messages; if none, start title generation asynchronously.
 	msgs, err := a.messages.List(ctx, sessionID)
 	if err != nil {
@@ -217,7 +209,7 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 		}()
 	}
 
-	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts, attachmentPaths)
+	userMsg, err := a.createUserMessage(ctx, sessionID, content, attachmentParts)
 	if err != nil {
 		return a.err(fmt.Errorf("failed to create user message: %w", err))
 	}
@@ -253,13 +245,12 @@ func (a *agent) processGeneration(ctx context.Context, sessionID, content string
 	}
 }
 
-func (a *agent) createUserMessage(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart, attachmentPaths string) (message.Message, error) {
+func (a *agent) createUserMessage(ctx context.Context, sessionID, content string, attachmentParts []message.ContentPart) (message.Message, error) {
 	parts := []message.ContentPart{message.TextContent{Text: content}}
 	parts = append(parts, attachmentParts...)
 	return a.messages.Create(ctx, sessionID, message.CreateMessageParams{
-		Role:            message.User,
-		Parts:           parts,
-		AttachmentPaths: attachmentPaths,
+		Role:  message.User,
+		Parts: parts,
 	})
 }
 

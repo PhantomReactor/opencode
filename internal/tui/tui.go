@@ -31,6 +31,10 @@ type keyMap struct {
 	SwitchTheme   key.Binding
 }
 
+const (
+	quitKey = "q"
+)
+
 var keys = keyMap{
 	Logs: key.NewBinding(
 		key.WithKeys("ctrl+l"),
@@ -81,7 +85,7 @@ var returnKey = key.NewBinding(
 )
 
 var logsKeyReturnKey = key.NewBinding(
-	key.WithKeys("esc", "backspace", "q"),
+	key.WithKeys("esc", "backspace", quitKey),
 	key.WithHelp("esc/q", "go back"),
 )
 
@@ -409,8 +413,8 @@ func (a appModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, a.themeDialog.Init()
 			}
 			return a, nil
-		case key.Matches(msg, returnKey) || key.Matches(msg, logsKeyReturnKey):
-			if msg.String() == "q" {
+		case key.Matches(msg, returnKey) || key.Matches(msg):
+			if msg.String() == quitKey {
 				if a.currentPage == page.LogsPage {
 					return a, a.moveToPage(page.ChatPage)
 				}

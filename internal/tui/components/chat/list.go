@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
@@ -235,16 +234,15 @@ func (m *messagesCmp) renderView() {
 	var styledAttachment string
 	t := theme.CurrentTheme()
 	for _, v := range m.uiMessages {
-		if v.attachmentPaths != "" {
+		if len(v.Attachments) > 0 {
 			var styledAttachments []string
 			attachmentStyles := styles.BaseStyle().
 				Height(1).
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(t.Primary())
 
-			attachmentPaths := strings.SplitSeq(v.attachmentPaths, "\n")
-			for attachment := range attachmentPaths {
-				filename := filepath.Base(attachment)
+			for _, attachment := range v.Attachments {
+				filename := filepath.Base(attachment.Path)
 				if len(filename) > 10 {
 					filename = "\uf44c " + filename[0:7] + "..."
 				}

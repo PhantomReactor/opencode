@@ -31,12 +31,12 @@ const (
 )
 
 type uiMessage struct {
-	ID              string
-	messageType     uiMessageType
-	position        int
-	height          int
-	content         string
-	attachmentPaths string
+	ID          string
+	messageType uiMessageType
+	position    int
+	height      int
+	content     string
+	Attachments []message.BinaryContent
 }
 
 func toMarkdown(content string, focused bool, width int) string {
@@ -83,12 +83,12 @@ func renderMessage(msg string, isUser bool, isFocused bool, width int, info ...s
 func renderUserMessage(msg message.Message, isFocused bool, width int, position int) uiMessage {
 	content := renderMessage(msg.Content().String(), true, isFocused, width)
 	userMsg := uiMessage{
-		ID:              msg.ID,
-		messageType:     userMessageType,
-		position:        position,
-		height:          lipgloss.Height(content),
-		content:         content,
-		attachmentPaths: msg.AttachmentPath,
+		ID:          msg.ID,
+		messageType: userMessageType,
+		position:    position,
+		height:      lipgloss.Height(content),
+		content:     content,
+		Attachments: msg.BinaryContent(),
 	}
 	return userMsg
 }

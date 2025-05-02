@@ -54,14 +54,16 @@ func newGeminiClient(opts providerClientOptions) GeminiClient {
 
 func (g *geminiClient) convertMessages(messages []message.Message) []*genai.Content {
 	var history []*genai.Content
-	for _, msg := range messages {
+	for i, msg := range messages {
 		switch msg.Role {
 		case message.User:
 			var parts []genai.Part
 			parts = append(parts, genai.Text(msg.Content().String()))
-			for _, binaryContent := range msg.BinaryContent() {
-				imageFormat := strings.Split(binaryContent.MIMEType, "/")
-				parts = append(parts, genai.ImageData(imageFormat[1], binaryContent.Data))
+			if i == len(messages)-1 {
+				for _, binaryContent := range msg.BinaryContent() {
+					imageFormat := strings.Split(binaryContent.MIMEType, "/")
+					parts = append(parts, genai.ImageData(imageFormat[1], binaryContent.Data))
+				}
 			}
 			history = append(history, &genai.Content{
 				Parts: parts,
