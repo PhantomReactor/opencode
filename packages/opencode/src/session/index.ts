@@ -736,7 +736,9 @@ export namespace Session {
       },
     }
     await updateMessage(next)
-    const result = await generateText({
+
+    let text: Message.TextPart | undefined
+    const result = streamText({
       abortSignal: abort.signal,
       model: model.language,
       messages: [
@@ -757,17 +759,46 @@ export namespace Session {
           ],
         },
       ],
+      onStepFinish: async (step) => {
+        const assistant = next.metadata!.assistant!
+        const usage = getUsage(model.info, step.usage, step.providerMetadata)
+        assistant.cost += usage.cost
+        assistant.tokens = usage.tokens
+        await updateMessage(next)
+        if (text) {
+          Bus.publish(Message.Event.PartUpdated, {
+            part: text,
+            messageID: next.id,
+            sessionID: next.metadata.sessionID,
+          })
+        }
+        text = undefined
+      },
+      async onFinish(input) {
+        const assistant = next.metadata!.assistant!
+        const usage = getUsage(model.info, input.usage, input.providerMetadata)
+        assistant.cost = usage.cost
+        assistant.tokens = usage.tokens
+        next.metadata!.time.completed = Date.now()
+        await updateMessage(next)
+      },
     })
-    next.parts.push({
-      type: "text",
-      text: result.text,
-    })
-    const assistant = next.metadata!.assistant!
-    const usage = getUsage(model.info, result.usage, result.providerMetadata)
-    assistant.cost = usage.cost
-    assistant.tokens = usage.tokens
-    next.metadata!.time.completed = Date.now()
-    await updateMessage(next)
+
+    for await (const value of result.fullStream) {
+      switch (value.type) {
+        case "text-delta":
+          if (!text) {
+            text = {
+              type: "text",
+              text: value.textDelta,
+            }
+            next.parts.push(text)
+          } else text.text += value.textDelta
+
+          await updateMessage(next)
+          break
+      }
+    }
   }
 
   function lock(sessionID: string) {
