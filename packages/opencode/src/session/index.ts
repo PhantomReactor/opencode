@@ -248,7 +248,7 @@ export namespace Session {
       if (
         model.info.limit.context &&
         tokens >
-          (model.info.limit.context - (model.info.limit.output ?? 0)) * 0.9
+        (model.info.limit.context - (model.info.limit.output ?? 0)) * 0.9
       ) {
         await summarize({
           sessionID: input.sessionID,
@@ -295,7 +295,7 @@ export namespace Session {
               draft.title = result.text
             })
         })
-        .catch(() => {})
+        .catch(() => { })
     }
     const msg: Message.Info = {
       role: "user",
@@ -572,7 +572,7 @@ export namespace Session {
           case "tool-call": {
             const [match] = next.parts.flatMap((p) =>
               p.type === "tool-invocation" &&
-              p.toolInvocation.toolCallId === value.toolCallId
+                p.toolInvocation.toolCallId === value.toolCallId
                 ? [p]
                 : [],
             )
@@ -766,6 +766,7 @@ export namespace Session {
     const usage = getUsage(model.info, result.usage, result.providerMetadata)
     assistant.cost = usage.cost
     assistant.tokens = usage.tokens
+    next.metadata!.time.completed = Date.now()
     await updateMessage(next)
   }
 
