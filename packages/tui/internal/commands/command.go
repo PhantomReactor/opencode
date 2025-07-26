@@ -1,12 +1,18 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/google/uuid"
 	"github.com/sst/opencode-sdk-go"
+	"github.com/sst/opencode/internal/attachment"
 )
 
 type ExecuteCommandMsg Command
@@ -30,6 +36,9 @@ type Command struct {
 	Description string
 	Keybindings []Keybinding
 	Trigger     []string
+	Prompt      string
+	Variables   []string
+	IsCustom    bool
 }
 
 func (c Command) Keys() []string {
@@ -55,6 +64,113 @@ func (c Command) MatchesTrigger(trigger string) bool {
 	return slices.Contains(c.Trigger, trigger)
 }
 
+func (c Command) HasVariables() bool {
+	return len(c.Variables) > 0
+}
+
+func (c Command) ReplaceVariables(args []string) string {
+	if !c.IsCustom {
+		return c.Prompt
+	}
+
+	result := c.Prompt
+	for i, variable := range c.Variables {
+		placeholder := "$" + variable
+		replacement := ""
+		if i < len(args) {
+			replacement = args[i]
+		}
+		result = strings.ReplaceAll(result, placeholder, replacement)
+	}
+	return result
+}
+
+func (c Command) ProcessWithTerminalCommands(args []string, client *opencode.Client) (string, error) {
+	if !c.IsCustom {
+		return c.Prompt, nil
+	}
+
+	if !strings.Contains(c.Prompt, "!`") {
+		return c.ReplaceVariables(args), nil
+	}
+
+	variables := make(map[string]string)
+	for i, variable := range c.Variables {
+		if i < len(args) {
+			variables[variable] = args[i]
+		} else {
+			variables[variable] = ""
+		}
+	}
+
+	ctx := context.Background()
+	response, err := client.Config.ExecuteCommand(ctx, opencode.ConfigExecuteCommandParams{
+		Prompt:    c.Prompt,
+		Variables: variables,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return response.ProcessedPrompt, nil
+}
+
+func ProcessAttachmentsInText(text string, cwd string) (string, []*attachment.Attachment) {
+	var attachments []*attachment.Attachment
+	var result strings.Builder
+
+	i := 0
+	for i < len(text) {
+		if text[i] == '@' {
+			start := i + 1
+			end := start
+
+			for end < len(text) && text[end] != ' ' && text[end] != '\t' && text[end] != '\n' && text[end] != '\r' {
+				end++
+			}
+
+			if end > start {
+				filePath := text[start:end]
+
+				fullPath := filePath
+				if !filepath.IsAbs(filePath) {
+					fullPath = filepath.Join(cwd, filePath)
+				}
+
+				if _, err := os.Stat(fullPath); err == nil {
+					displayText := "@" + filepath.Base(filePath)
+					startIndex := result.Len()
+					endIndex := startIndex + len(displayText)
+
+					attachment := &attachment.Attachment{
+						ID:         uuid.NewString(),
+						Type:       "file",
+						Display:    displayText,
+						URL:        fmt.Sprintf("file://%s", fullPath),
+						Filename:   filepath.Base(filePath),
+						MediaType:  "text/plain",
+						StartIndex: startIndex,
+						EndIndex:   endIndex,
+						Source: &attachment.FileSource{
+							Path: filePath,
+						},
+					}
+					attachments = append(attachments, attachment)
+
+					result.WriteString(displayText)
+					i = end
+					continue
+				}
+			}
+		}
+
+		result.WriteByte(text[i])
+		i++
+	}
+
+	return result.String(), attachments
+}
+
 type CommandRegistry map[CommandName]Command
 
 func (r CommandRegistry) Sorted() []Command {
@@ -63,7 +179,17 @@ func (r CommandRegistry) Sorted() []Command {
 		commands = append(commands, command)
 	}
 	slices.SortFunc(commands, func(a, b Command) int {
-		// Priority order: session_new, session_share, model_list, app_help first, app_exit last
+		if a.IsCustom && !b.IsCustom {
+			return 1
+		}
+		if !a.IsCustom && b.IsCustom {
+			return -1
+		}
+
+		if a.IsCustom && b.IsCustom {
+			return strings.Compare(string(a.Name), string(b.Name))
+		}
+
 		priorityOrder := map[CommandName]int{
 			SessionNewCommand:   0,
 			AppHelpCommand:      1,
@@ -168,7 +294,43 @@ func parseBindings(bindings ...string) []Keybinding {
 	return parsedBindings
 }
 
-func LoadFromConfig(config *opencode.Config) CommandRegistry {
+func loadCustomCommands(client *opencode.Client, defaultCommands []Command) []Command {
+	var customCommands []Command
+
+	if client == nil {
+		return customCommands
+	}
+
+	ctx := context.Background()
+	commandsResponse, err := client.Config.Commands(ctx)
+	if err != nil {
+		return customCommands
+	}
+
+	for _, cmdResp := range commandsResponse {
+		isDupliacateCommand := false
+		for _, defaultCommand := range defaultCommands {
+			if slices.Contains(defaultCommand.Trigger, cmdResp.Name) {
+				isDupliacateCommand = true
+				break
+			}
+		}
+		if isDupliacateCommand {
+			continue
+		}
+		customCommands = append(customCommands, Command{
+			Name:        CommandName(cmdResp.Name),
+			Description: cmdResp.Description,
+			Trigger:     []string{cmdResp.Name},
+			Prompt:      cmdResp.Prompt,
+			Variables:   cmdResp.Variables,
+			IsCustom:    true,
+		})
+	}
+
+	return customCommands
+}
+func LoadFromConfig(config *opencode.Config, client *opencode.Client) CommandRegistry {
 	defaults := []Command{
 		{
 			Name:        AppHelpCommand,
@@ -367,16 +529,29 @@ func LoadFromConfig(config *opencode.Config) CommandRegistry {
 			Trigger:     []string{"exit", "quit", "q"},
 		},
 	}
+
 	registry := make(CommandRegistry)
 	keybinds := map[string]string{}
 	marshalled, _ := json.Marshal(config.Keybinds)
 	json.Unmarshal(marshalled, &keybinds)
+
 	for _, command := range defaults {
 		// Remove share/unshare commands if sharing is disabled
 		if config.Share == opencode.ConfigShareDisabled &&
 			(command.Name == SessionShareCommand || command.Name == SessionUnshareCommand) {
 			continue
 		}
+		if keybind, ok := keybinds[string(command.Name)]; ok && keybind != "" {
+			if keybind == "none" {
+				continue
+			}
+			command.Keybindings = parseBindings(keybind)
+		}
+		registry[command.Name] = command
+	}
+
+	customCommands := loadCustomCommands(client, defaults)
+	for _, command := range customCommands {
 		if keybind, ok := keybinds[string(command.Name)]; ok && keybind != "" {
 			if keybind == "none" {
 				continue

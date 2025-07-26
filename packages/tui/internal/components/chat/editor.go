@@ -223,11 +223,18 @@ func (m *editorComponent) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.Item.ProviderID {
 		case "commands":
 			commandName := strings.TrimPrefix(msg.Item.Value, "/")
-			updated, cmd := m.Clear()
-			m = updated.(*editorComponent)
-			cmds = append(cmds, cmd)
-			cmds = append(cmds, util.CmdHandler(commands.ExecuteCommandMsg(m.app.Commands[commands.CommandName(commandName)])))
-			return m, tea.Batch(cmds...)
+			command := m.app.Commands[commands.CommandName(commandName)]
+
+			if command.IsCustom && command.HasVariables() {
+				m.textarea.SetValue("/" + commandName + ":")
+				return m, nil
+			} else {
+				updated, cmd := m.Clear()
+				m = updated.(*editorComponent)
+				cmds = append(cmds, cmd)
+				cmds = append(cmds, util.CmdHandler(commands.ExecuteCommandMsg(command)))
+				return m, tea.Batch(cmds...)
+			}
 		case "files":
 			atIndex := m.textarea.LastRuneIndex('@')
 			if atIndex == -1 {
@@ -422,6 +429,29 @@ func (m *editorComponent) Submit() (tea.Model, tea.Cmd) {
 	value := strings.TrimSpace(m.Value())
 	if value == "" {
 		return m, nil
+	}
+
+	if strings.HasPrefix(value, "/") && strings.Contains(value, ":") {
+		parts := strings.Split(value[1:], ":") // Remove leading "/" and split by ":"
+		commandName := parts[0]
+		args := parts[1:]
+
+		if command, exists := m.app.Commands[commands.CommandName(commandName)]; exists && command.IsCustom {
+			prompt, err := command.ProcessWithTerminalCommands(args, m.app.Client)
+			if err != nil {
+				prompt = command.ReplaceVariables(args)
+			}
+
+			processedPrompt, attachments := commands.ProcessAttachmentsInText(prompt, m.app.Info.Path.Cwd)
+
+			updated, cmd := m.Clear()
+			m = updated.(*editorComponent)
+
+			return m, tea.Batch(cmd, util.CmdHandler(app.SendPrompt(app.Prompt{
+				Text:        processedPrompt,
+				Attachments: attachments,
+			})))
+		}
 	}
 
 	switch value {

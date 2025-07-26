@@ -40,6 +40,20 @@ func (r *ConfigService) Get(ctx context.Context, opts ...option.RequestOption) (
 	return
 }
 
+func (r *ConfigService) Commands(ctx context.Context, opts ...option.RequestOption) (res []ConfigCommand, err error) {
+	opts = append(r.Options[:], opts...)
+	path := "commands"
+	err = requestconfig.ExecuteNewRequest(ctx, http.MethodGet, path, nil, &res, opts...)
+	return
+}
+
+func (r *ConfigService) ExecuteCommand(ctx context.Context, body ConfigExecuteCommandParams, opts ...option.RequestOption) (res *ConfigExecuteCommandResponse, err error) {
+	opts = append(r.Options[:], opts...)
+	path := "commands/execute"
+	err = requestconfig.ExecuteNewRequest(ctx, http.MethodPost, path, body, &res, opts...)
+	return
+}
+
 type Config struct {
 	// JSON schema reference for configuration validation
 	Schema string `json:"$schema"`
@@ -736,5 +750,70 @@ func (r *ModeConfig) UnmarshalJSON(data []byte) (err error) {
 }
 
 func (r modeConfigJSON) RawJSON() string {
+	return r.raw
+}
+
+type ConfigCommand struct {
+	Name        string            `json:"name"`
+	Description string            `json:"description"`
+	Prompt      string            `json:"prompt"`
+	Variables   []string          `json:"variables"`
+	JSON        configCommandJSON `json:"-"`
+}
+
+type configCommandJSON struct {
+	Name        apijson.Field
+	Description apijson.Field
+	Prompt      apijson.Field
+	Variables   apijson.Field
+	raw         string
+	ExtraFields map[string]apijson.Field
+}
+
+func (r *ConfigCommand) UnmarshalJSON(data []byte) (err error) {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+func (r configCommandJSON) RawJSON() string {
+	return r.raw
+}
+
+type ConfigExecuteCommandParams struct {
+	Prompt    string                         `json:"prompt,required"`
+	Variables map[string]string              `json:"variables,required"`
+	JSON      configExecuteCommandParamsJSON `json:"-"`
+}
+
+type configExecuteCommandParamsJSON struct {
+	Prompt      apijson.Field
+	Variables   apijson.Field
+	raw         string
+	ExtraFields map[string]apijson.Field
+}
+
+func (r *ConfigExecuteCommandParams) UnmarshalJSON(data []byte) (err error) {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+func (r configExecuteCommandParamsJSON) RawJSON() string {
+	return r.raw
+}
+
+type ConfigExecuteCommandResponse struct {
+	ProcessedPrompt string                           `json:"processedPrompt"`
+	JSON            configExecuteCommandResponseJSON `json:"-"`
+}
+
+type configExecuteCommandResponseJSON struct {
+	ProcessedPrompt apijson.Field
+	raw             string
+	ExtraFields     map[string]apijson.Field
+}
+
+func (r *ConfigExecuteCommandResponse) UnmarshalJSON(data []byte) (err error) {
+	return apijson.UnmarshalRoot(data, r)
+}
+
+func (r configExecuteCommandResponseJSON) RawJSON() string {
 	return r.raw
 }

@@ -18,6 +18,7 @@ import { LSP } from "../lsp"
 import { MessageV2 } from "../session/message-v2"
 import { Mode } from "../session/mode"
 import { callTui, TuiRoute } from "./tui"
+import { Commands } from "../commands"
 
 const ERRORS = {
   400: {
@@ -805,6 +806,67 @@ export namespace Server {
           },
         }),
         async (c) => c.json(await callTui(c)),
+      )
+      .get(
+        "/commands",
+        describeRoute({
+          description: "List custom commands from ~/.config/opencode/commands",
+          responses: {
+            200: {
+              description: "List of custom commands",
+              content: {
+                "application/json": {
+                  schema: resolver(
+                    z
+                      .object({
+                        name: z.string(),
+                        description: z.string(),
+                        prompt: z.string(),
+                        variables: z.string().array(),
+                      })
+                      .array(),
+                  ),
+                },
+              },
+            },
+          },
+        }),
+        async (c) => {
+          const commands = await Commands.list()
+          return c.json(commands)
+        },
+      )
+      .post(
+        "/commands/execute",
+        describeRoute({
+          description: "Execute terminal commands and process custom command with variable replacement",
+          responses: {
+            200: {
+              description: "Processed command with terminal output",
+              content: {
+                "application/json": {
+                  schema: resolver(
+                    z.object({
+                      processedPrompt: z.string(),
+                    }),
+                  ),
+                },
+              },
+            },
+          },
+        }),
+        zValidator(
+          "json",
+          z.object({
+            prompt: z.string(),
+            variables: z.record(z.string()),
+          }),
+        ),
+        async (c) => {
+          const request = c.req.valid("json")
+          const result = await Commands.execute(request)
+          return c.json(result)
+        },
       )
       .route("/tui/control", TuiRoute)
 

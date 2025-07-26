@@ -1059,6 +1059,29 @@ func (a Model) executeCommand(command commands.Command) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case commands.AppExitCommand:
 		return a, tea.Quit
+	default:
+		if command.IsCustom {
+			if command.HasVariables() {
+				commandText := "/" + command.PrimaryTrigger()
+				a.editor.SetValueWithAttachments(commandText)
+				updated, cmd := a.editor.Focus()
+				a.editor = updated.(chat.EditorComponent)
+				cmds = append(cmds, cmd)
+			} else {
+				prompt, err := command.ProcessWithTerminalCommands([]string{}, a.app.Client)
+				if err != nil {
+					prompt = command.ReplaceVariables([]string{})
+				}
+
+				processedPrompt, attachments := commands.ProcessAttachmentsInText(prompt, a.app.Info.Path.Cwd)
+
+				a.app, cmd = a.app.SendPrompt(context.Background(), app.SendPrompt{
+					Text:        processedPrompt,
+					Attachments: attachments,
+				})
+				cmds = append(cmds, cmd)
+			}
+		}
 	}
 	return a, tea.Batch(cmds...)
 }

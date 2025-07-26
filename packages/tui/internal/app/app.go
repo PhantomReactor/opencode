@@ -172,7 +172,7 @@ func New(
 		Mode:          mode,
 		Session:       &opencode.Session{},
 		Messages:      []Message{},
-		Commands:      commands.LoadFromConfig(configInfo),
+		Commands:      commands.LoadFromConfig(configInfo, httpClient),
 		InitialModel:  initialModel,
 		InitialPrompt: initialPrompt,
 		IntitialMode:  initialMode,
